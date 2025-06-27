@@ -3436,6 +3436,29 @@ class TestEdgeQLDataMigration(EdgeQLDataMigrationTestCase):
             }],
         )
 
+    async def test_edgeql_migration_computed_07(self):
+        await self.migrate(r'''
+            type T;
+            type S {
+                multi ts: T;
+                val := count(.ts);
+            };
+        ''', module='default')
+        await self.migrate(r'''
+            type T;
+            type S {
+                multi ts: T;
+                val := 0;
+            };
+        ''', module='default')
+        await self.migrate(r'''
+            type T;
+            type S {
+                multi ts: T;
+                val := count(.ts);
+            };
+        ''', module='default')
+
     async def test_edgeql_migration_reject_prop_01(self):
         await self.migrate('''
             type User {
@@ -6101,6 +6124,49 @@ class TestEdgeQLDataMigration(EdgeQLDataMigrationTestCase):
             };
         """)
         await self.migrate(r"")
+
+    async def test_edgeql_migration_permissions_03a(self):
+        # Check tracing dependency works
+        await self.migrate(r"""
+          function test(x: int64) -> int64 {
+              using (x);
+              required_permissions := foo;
+          };
+          permission foo;
+       """)
+
+    async def test_edgeql_migration_permissions_03b(self):
+        # Check tracing dependency works
+        await self.migrate(r"""
+          function test(x: int64) -> int64 {
+              using (1);
+              required_permissions := {foo, bar};
+          };
+          permission foo;
+          permission bar;
+       """)
+
+    async def test_edgeql_migration_permissions_03c(self):
+        # Check tracing dependency works
+        await self.migrate(r"""
+          permission foo;
+          permission bar;
+          function test(x: int64) -> int64 {
+              using (1);
+              required_permissions := {foo, bar};
+          };
+       """)
+
+    async def test_edgeql_migration_permissions_03d(self):
+        # Sigh... test using POPULATE MIGRATION also...
+        # Check tracing dependency works
+        await tb.DDLTestCase.migrate(self, r"""
+          permission foo;
+          function test(x: int64) -> int64 {
+              using (x);
+              required_permissions := foo;
+          };
+       """)
 
     async def test_edgeql_migration_index_01(self):
         await self.migrate('''
@@ -12326,7 +12392,7 @@ class TestEdgeQLDataMigrationNonisolated(EdgeQLDataMigrationTestCase):
         await self.migrate('')
 
     async def test_edgeql_migration_recovery_commit_fail(self):
-        con2 = await self.connect(database=self.con.dbname)
+        con2 = await self.connect()
         try:
             await con2.execute('START MIGRATION TO {}')
             await con2.execute('POPULATE MIGRATION')
