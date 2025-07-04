@@ -649,7 +649,7 @@ def _trace_item_layout(
                     for pn, p in base_pointers.items(ctx.schema):
                         PointerType = (
                             qltracer.Property
-                            if p.is_property(ctx.schema) else
+                            if p.is_property() else
                             qltracer.Link
                         )
                         base_obj.pointers[pn] = PointerType(
@@ -1246,6 +1246,11 @@ def _register_item(
                 assert isinstance(alter_cmd, qlast.ConcreteConstraintOp)
                 alter_cmd.subjectexpr = decl.subjectexpr
                 alter_cmd.args = decl.args
+
+            # functions need to preserve arguments
+            if isinstance(decl, qlast.CreateFunction):
+                assert isinstance(alter_cmd, qlast.FunctionCommand)
+                alter_cmd.params = decl.params
 
             if not ctx.depstack:
                 alter_cmd.aliases = [

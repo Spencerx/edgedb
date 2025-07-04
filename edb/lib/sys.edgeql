@@ -118,6 +118,7 @@ CREATE TYPE sys::Role EXTENDING
     CREATE PROPERTY is_superuser := .superuser;
     CREATE PROPERTY password -> std::str;
     CREATE MULTI PROPERTY permissions -> std::str;
+    CREATE MULTI PROPERTY branches -> std::str;
 };
 
 
@@ -443,3 +444,11 @@ sys::approximate_count(
     USING SQL FUNCTION 'edgedb.approximate_count';
     set impl_is_strict := false;
 };
+
+
+CREATE MODULE sys::perm;
+CREATE PERMISSION sys::perm::superuser;
+CREATE PERMISSION sys::perm::data_modification;
+CREATE PERMISSION sys::perm::ddl;
+CREATE PERMISSION sys::perm::branch_config;
+CREATE PERMISSION sys::perm::sql_session_config;

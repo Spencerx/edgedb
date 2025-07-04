@@ -133,6 +133,7 @@ from typing import (
     TypeVar,
     AbstractSet,
     Mapping,
+    Sequence,
     cast,
     overload,
     TYPE_CHECKING,
@@ -351,6 +352,7 @@ def compile_ast_fragment_to_ir(
         views={},
         params=[],
         globals=[],
+        required_permissions=set(),
         server_param_conversions=[],
         server_param_conversion_params=[],
         # These values are nonsensical, but ideally the caller does not care
@@ -372,7 +374,7 @@ def compile_ast_fragment_to_ir(
 
 @compiler_entrypoint
 def preprocess_script(
-    stmts: list[qlast.Base],
+    stmts: Sequence[qlast.Base],
     schema: s_schema.Schema,
     *,
     options: CompilerOptions,
