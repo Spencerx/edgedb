@@ -22,15 +22,14 @@ from __future__ import annotations
 from typing import (
     Any,
     Callable,
-    Generic,
-    Optional,
-    TypeVar,
+    cast,
     Iterable,
     Iterator,
     Mapping,
-    cast,
     NoReturn,
+    Optional,
     overload,
+    Self,
     TYPE_CHECKING,
 )
 
@@ -74,13 +73,20 @@ STD_MODULES = (
     sn.UnqualName('schema'),
     sn.UnqualName('std::math'),
     sn.UnqualName('sys'),
+    sn.UnqualName('sys::perm'),
     sn.UnqualName('cfg'),
+    sn.UnqualName('cfg::perm'),
     sn.UnqualName('std::cal'),
     sn.UnqualName('std::net'),
     sn.UnqualName('std::net::http'),
     sn.UnqualName('std::pg'),
     sn.UnqualName('std::_test'),
     sn.UnqualName('std::fts'),
+    sn.UnqualName('std::lang'),
+    sn.UnqualName('std::lang::go'),
+    sn.UnqualName('std::lang::js'),
+    sn.UnqualName('std::lang::py'),
+    sn.UnqualName('std::lang::rs'),
     EXT_MODULE,
     sn.UnqualName('std::enc'),
 )
@@ -109,47 +115,45 @@ TESTMODE_SOURCES = (
     sn.UnqualName('_testmode'),
 )
 
-Schema_T = TypeVar('Schema_T', bound='Schema')
-
 
 class Schema(abc.ABC):
 
     @abc.abstractmethod
     def add_raw(
-        self: Schema_T,
+        self: Self,
         id: uuid.UUID,
         sclass: type[so.Object],
         data: tuple[Any, ...],
-    ) -> Schema_T:
+    ) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
     def add(
-        self: Schema_T,
+        self: Self,
         id: uuid.UUID,
         sclass: type[so.Object],
         data: tuple[Any, ...],
-    ) -> Schema_T:
+    ) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def discard(self: Schema_T, obj: so.Object) -> Schema_T:
+    def discard(self: Self, obj: so.Object) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def delete(self: Schema_T, obj: so.Object) -> Schema_T:
+    def delete(self: Self, obj: so.Object) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def delist(self: Schema_T, name: sn.Name) -> Schema_T:
+    def delist(self: Self, name: sn.Name) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
     def update_obj(
-        self: Schema_T,
+        self: Self,
         obj: so.Object,
         updates: Mapping[str, Any],
-    ) -> Schema_T:
+    ) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -168,19 +172,19 @@ class Schema(abc.ABC):
 
     @abc.abstractmethod
     def set_obj_field(
-        self: Schema_T,
+        self: Self,
         obj: so.Object,
         field: str,
         value: Any,
-    ) -> Schema_T:
+    ) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
     def unset_obj_field(
-        self: Schema_T,
+        self: Self,
         obj: so.Object,
         field: str,
-    ) -> Schema_T:
+    ) -> Self:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -1603,7 +1607,7 @@ def upgrade_schema(schema: FlatSchema) -> FlatSchema:
     return schema._replace(id_to_data=id_to_data.update(fixes))
 
 
-class SchemaIterator(Generic[so.Object_T]):
+class SchemaIterator[Object_T: so.Object]:
     def __init__(
         self,
         schema: Schema,
@@ -1617,8 +1621,8 @@ class SchemaIterator(Generic[so.Object_T]):
         excluded_modules: Optional[Iterable[sn.Name]],
         included_items: Optional[Iterable[sn.Name]] = None,
         excluded_items: Optional[Iterable[sn.Name]] = None,
-        type: Optional[type[so.Object_T]] = None,
-        extra_filters: Iterable[Callable[[Schema, so.Object_T], bool]] = (),
+        type: Optional[type[Object_T]] = None,
+        extra_filters: Iterable[Callable[[Schema, Object_T], bool]] = (),
     ) -> None:
 
         filters = []
@@ -1685,7 +1689,7 @@ class SchemaIterator(Generic[so.Object_T]):
         self._schema = schema
         self._object_ids = object_ids
 
-    def __iter__(self) -> Iterator[so.Object_T]:
+    def __iter__(self) -> Iterator[Object_T]:
         filters = self._filters
         schema = self._schema
         get_by_id = schema.get_by_id

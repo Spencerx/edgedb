@@ -300,6 +300,7 @@ class AliasCommand(
                 derived_target_module=classname.module,
                 modaliases=context.modaliases,
                 in_ddl_context_name='alias definition',
+                schema_object_context=self.get_schema_metaclass(),
                 track_schema_ref_exprs=track_schema_ref_exprs,
             ),
             context=context,
@@ -443,15 +444,15 @@ class AlterAlias(
     astnode = qlast.AlterAlias
 
 
-class DeleteAliasLike(
-    AliasLikeCommand[so.QualifiedObject_T],
-    sd.DeleteObject[so.QualifiedObject_T],
+class DeleteAliasLike[QualifiedObject_T: so.QualifiedObject](
+    AliasLikeCommand[QualifiedObject_T],
+    sd.DeleteObject[QualifiedObject_T],
 ):
     def _canonicalize(
         self,
         schema: s_schema.Schema,
         context: sd.CommandContext,
-        scls: so.QualifiedObject_T,
+        scls: QualifiedObject_T,
     ) -> list[sd.Command]:
         ops = super()._canonicalize(schema, context, scls)
         if self._is_computable(scls, schema):
@@ -488,6 +489,7 @@ def compile_alias_expr(
             result_view_name=classname,
             modaliases=context.modaliases,
             schema_view_mode=True,
+            schema_object_context=Alias,
             in_ddl_context_name='alias definition',
             bootstrap_mode=context.stdmode,
         ),

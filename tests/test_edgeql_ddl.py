@@ -3597,16 +3597,90 @@ class TestEdgeQLDDL(tb.DDLTestCase):
         await self.assert_query_result("select X { foo }", [{"foo": "test"}])
 
     async def test_edgeql_ddl_link_property_01(self):
-        with self.assertRaisesRegex(
-                edgedb.InvalidPropertyDefinitionError,
-                r"link properties cannot be required"):
-            await self.con.execute("""
-                CREATE TYPE TestLinkPropType_01 {
-                    CREATE LINK test_linkprop_link_01 -> std::Object {
-                        CREATE REQUIRED PROPERTY test_link_prop_01
-                            -> std::int64;
-                    };
+        await self.con.execute("""
+            CREATE TYPE Tgt;
+            INSERT Tgt;
+            CREATE TYPE TestLinkPropType_01 {
+                CREATE LINK test_linkprop_link_01 -> std::Object {
+                    CREATE REQUIRED PROPERTY test_link_prop_01
+                        -> std::int64;
                 };
+            };
+        """)
+        await self.con.execute("""
+            insert TestLinkPropType_01 {
+                test_linkprop_link_01 := (select Tgt limit 1) {
+                    @test_link_prop_01 := 12
+                }
+            }
+        """)
+        async with self.assertRaisesRegexTx(
+            edgedb.MissingRequiredError,
+            r"required property 'test_link_prop_01'",
+        ):
+            await self.con.execute("""
+                insert TestLinkPropType_01 {
+                    test_linkprop_link_01 := (select Tgt limit 1) {
+                        @test_link_prop_01 := (select 12 filter false)
+                    }
+                }
+            """)
+        async with self.assertRaisesRegexTx(
+            edgedb.MissingRequiredError,
+            r"required property 'test_link_prop_01'",
+        ):
+            # TODO?: It would be better if we rejected this statically...
+            await self.con.execute("""
+                insert TestLinkPropType_01 {
+                    test_linkprop_link_01 := (select Tgt limit 1)
+                }
+            """)
+
+        await self.con.execute("""
+            alter type TestLinkPropType_01
+            alter link test_linkprop_link_01
+            alter property test_link_prop_01
+            set optional
+        """)
+
+        await self.con.execute("""
+            insert TestLinkPropType_01 {
+                test_linkprop_link_01 := (select Tgt limit 1)
+            }
+        """)
+
+        async with self.assertRaisesRegexTx(
+            edgedb.MissingRequiredError,
+            r"required property 'test_link_prop_01'",
+        ):
+            await self.con.execute("""
+                alter type TestLinkPropType_01
+                alter link test_linkprop_link_01
+                alter property test_link_prop_01
+                set required
+            """)
+
+        await self.con.execute("""
+            delete TestLinkPropType_01
+        """)
+
+        await self.con.execute("""
+            alter type TestLinkPropType_01
+            alter link test_linkprop_link_01
+            alter property test_link_prop_01
+            set required
+        """)
+
+        async with self.assertRaisesRegexTx(
+            edgedb.MissingRequiredError,
+            r"required property 'test_link_prop_01'",
+        ):
+            await self.con.execute("""
+                insert TestLinkPropType_01 {
+                    test_linkprop_link_01 := (select Tgt limit 1) {
+                        @test_link_prop_01 := (select 12 filter false)
+                    }
+                }
             """)
 
     async def test_edgeql_ddl_link_property_02(self):
@@ -3624,23 +3698,6 @@ class TestEdgeQLDDL(tb.DDLTestCase):
     async def test_edgeql_ddl_link_property_03(self):
         with self.assertRaisesRegex(
                 edgedb.InvalidPropertyDefinitionError,
-                r"link properties cannot be required"):
-            await self.con.execute("""
-                CREATE TYPE TestLinkPropType_03 {
-                    CREATE LINK test_linkprop_link_03 -> std::Object;
-                };
-
-                ALTER TYPE TestLinkPropType_03 {
-                    ALTER LINK test_linkprop_link_03 {
-                        CREATE REQUIRED PROPERTY test_link_prop_03
-                            -> std::int64;
-                    };
-                };
-            """)
-
-    async def test_edgeql_ddl_link_property_04(self):
-        with self.assertRaisesRegex(
-                edgedb.InvalidPropertyDefinitionError,
                 r"multi properties aren't supported for links"):
             await self.con.execute("""
                 CREATE TYPE TestLinkPropType_04 {
@@ -3654,27 +3711,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 };
             """)
 
-    async def test_edgeql_ddl_link_property_05(self):
-        with self.assertRaisesRegex(
-                edgedb.InvalidPropertyDefinitionError,
-                r"link properties cannot be required"):
-            await self.con.execute("""
-                CREATE TYPE TestLinkPropType_05 {
-                    CREATE LINK test_linkprop_link_05 -> std::Object {
-                        CREATE PROPERTY test_link_prop_05 -> std::int64;
-                    };
-                };
-
-                ALTER TYPE TestLinkPropType_05 {
-                    ALTER LINK test_linkprop_link_05 {
-                        ALTER PROPERTY test_link_prop_05 {
-                            SET REQUIRED;
-                        };
-                    };
-                };
-            """)
-
-    async def test_edgeql_ddl_link_property_06(self):
+    async def test_edgeql_ddl_link_property_04(self):
         with self.assertRaisesRegex(
                 edgedb.InvalidPropertyDefinitionError,
                 r"multi properties aren't supported for links"):
@@ -7795,7 +7832,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := [1]',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -7814,7 +7851,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := (1,)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -7838,7 +7875,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := (f := 1)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -7862,12 +7899,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -7891,17 +7928,17 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := [(f := [1])]',
                 [
                     {
-                        'name': 'array<tuple<f:array<std||int64>>>',
+                        'name': 'array<tuple<f:array<std::int64>>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
                     {
-                        'name': 'tuple<f:array<std|int64>>',
+                        'name': 'tuple<f:array<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -7920,12 +7957,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := ([1],)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
                     {
-                        'name': 'tuple<array<std|int64>>',
+                        'name': 'tuple<array<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8008,7 +8045,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo: array<tuple<int64>>',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -8032,12 +8069,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo: array<tuple<f:array<int64>>>',
                 [
                     {
-                        'name': 'array<tuple<f:array<std||int64>>>',
+                        'name': 'array<tuple<f:array<std::int64>>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'tuple<f:array<std|int64>>',
+                        'name': 'tuple<f:array<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8056,7 +8093,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo: tuple<array<int64>>',
                 [
                     {
-                        'name': 'tuple<array<std|int64>>',
+                        'name': 'tuple<array<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8076,12 +8113,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8096,12 +8133,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global bar: tuple<tuple<int64>>',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8111,7 +8148,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8126,7 +8163,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8146,12 +8183,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8166,12 +8203,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global bar: tuple<tuple<int64>>',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8181,7 +8218,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8191,12 +8228,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'drop global bar',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8226,7 +8263,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8236,12 +8273,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global bar := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::bar@default|bar@global',
+                        'name': 'default::bar',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8251,7 +8288,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8266,7 +8303,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8291,7 +8328,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8301,12 +8338,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global bar := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::bar@default|bar@global',
+                        'name': 'default::bar',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8316,7 +8353,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8326,12 +8363,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'drop global foo',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::bar@default|bar@global',
+                        'name': 'default::bar',
                         'from_alias': True,
                         'type_name': 'schema::ArrayExprAlias',
                     },
@@ -8356,7 +8393,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := ((1,),)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8366,7 +8403,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8376,12 +8413,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create function bar() -> array<tuple<int64>> using([(1,)])',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8391,7 +8428,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8401,7 +8438,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'drop global foo',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -8426,7 +8463,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create function foo() -> array<tuple<int64>> using([(1,)])',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -8441,12 +8478,12 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global bar := ((1,),)',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
                     {
-                        'name': 'default::bar@default|bar@global',
+                        'name': 'default::bar',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8456,7 +8493,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8466,7 +8503,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'drop function foo()',
                 [
                     {
-                        'name': 'default::bar@default|bar@global',
+                        'name': 'default::bar',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8476,7 +8513,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8501,7 +8538,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8511,7 +8548,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create function bar() -> array<tuple<int64>> using([(1,)])',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -8521,7 +8558,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8531,7 +8568,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'drop global foo',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -8556,7 +8593,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create function foo() -> array<tuple<int64>> using([(1,)])',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -8571,7 +8608,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global bar: tuple<tuple<int64>>',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -8581,7 +8618,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8596,7 +8633,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -8615,7 +8652,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := (1,)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8630,7 +8667,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'alter global foo {using ((2,))}',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8654,7 +8691,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := (1,)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8669,7 +8706,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'alter global foo {using (("a",))}',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8693,7 +8730,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := (1,)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8732,7 +8769,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 'create global foo := (1,)',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8821,7 +8858,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 ''',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8860,7 +8897,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 ''',
                 [
                     {
-                        'name': 'default::foo@default|foo@global',
+                        'name': 'default::foo',
                         'from_alias': True,
                         'type_name': 'schema::TupleExprAlias',
                     },
@@ -8880,7 +8917,8 @@ class TestEdgeQLDDL(tb.DDLTestCase):
         """)
         await self.assert_query_result(
             'select global foo;',
-            [False],
+            # Tests run as superuser
+            [True],
         )
         await self.con.execute(r"""
             drop permission foo;
@@ -8904,7 +8942,9 @@ class TestEdgeQLDDL(tb.DDLTestCase):
             select schema::Permission {
                 name,
                 annotations: {n := .name, v := @value},
-            };''',
+            }
+            filter .name = 'default::foo';
+            ''',
             [
                 {
                     'name': 'default::foo',
@@ -8924,7 +8964,9 @@ class TestEdgeQLDDL(tb.DDLTestCase):
             select schema::Permission {
                 name,
                 annotations: {n := .name, v := @value},
-            };''',
+            }
+            filter .name = 'default::foo';
+            ''',
             [
                 {
                     'name': 'default::foo',
@@ -8945,7 +8987,9 @@ class TestEdgeQLDDL(tb.DDLTestCase):
             select schema::Permission {
                 name,
                 annotations: {n := .name, v := @value},
-            };''',
+            }
+            filter .name = 'default::foo';
+            ''',
             [
                 {
                     'name': 'default::foo',
@@ -8966,7 +9010,9 @@ class TestEdgeQLDDL(tb.DDLTestCase):
             select schema::Permission {
                 name,
                 annotations: {n := .name, v := @value},
-            };''',
+            }
+            filter .name = 'default::foo';
+            ''',
             [
                 {
                     'name': 'default::foo',
@@ -8983,7 +9029,8 @@ class TestEdgeQLDDL(tb.DDLTestCase):
         """)
         await self.assert_query_result(
             'select global foo;',
-            [False],
+            # Tests run as superuser
+            [True],
         )
         await self.con.execute(r"""
             alter permission foo {
@@ -8992,7 +9039,8 @@ class TestEdgeQLDDL(tb.DDLTestCase):
         """)
         await self.assert_query_result(
             'select global bar;',
-            [False],
+            # Tests run as superuser
+            [True],
         )
         async with self.assertRaisesRegexTx(
             edgedb.QueryError,
@@ -9584,6 +9632,7 @@ class TestEdgeQLDDL(tb.DDLTestCase):
                 property name -> str;
                 index ON (.name) {
                     annotation title := 'name index';
+                    annotation lang::py::type := 'asdf';
                 }
             }
         ''')
@@ -9606,10 +9655,16 @@ class TestEdgeQLDDL(tb.DDLTestCase):
             [{
                 "indexes": [{
                     "expr": ".name",
-                    "annotations": [{
-                        "name": "std::title",
-                        "@value": "name index",
-                    }]
+                    "annotations": tb.bag([
+                        {
+                            "name": "std::title",
+                            "@value": "name index",
+                        },
+                        {
+                            "name": "std::lang::py::type",
+                            "@value": "asdf",
+                        },
+                    ])
                 }]
             }]
         )
@@ -11021,7 +11076,7 @@ type default::Foo {
         await self.con.execute(r"""
             CREATE ROLE foo_08 {
                 SET permissions := {
-                    default::foo, custom::bar, sys::data_modification
+                    default::foo, custom::bar, sys::perm::data_modification
                 };
             };
         """)
@@ -11039,7 +11094,7 @@ type default::Foo {
                 'permissions': [
                     'custom::bar',
                     'default::foo',
-                    'sys::data_modification',
+                    'sys::perm::data_modification',
                 ],
             }]
         )
@@ -11080,7 +11135,7 @@ type default::Foo {
         await self.con.execute(r"""
             ALTER ROLE foo_10 {
                 SET permissions := {
-                    default::foo, custom::bar, sys::data_modification
+                    default::foo, custom::bar, sys::perm::data_modification
                 };
             };
         """)
@@ -11098,10 +11153,103 @@ type default::Foo {
                 'permissions': [
                     'custom::bar',
                     'default::foo',
-                    'sys::data_modification',
+                    'sys::perm::data_modification',
                 ],
             }]
         )
+
+    async def test_edgeql_ddl_role_11(self):
+        # Check that sys::perm::superuser cannot be granted
+
+        # CREATE superuser
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                create superuser role foo_11a {
+                    set permissions := sys::perm::superuser;
+                };
+            ''')
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                create superuser role foo_11b {
+                    set permissions := { sys::perm::superuser, default::foo };
+                };
+            ''')
+
+        # CREATE non-superuser
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                create role foo_11c {
+                    set permissions := sys::perm::superuser;
+                };
+            ''')
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                create role foo_11d {
+                    set permissions := { sys::perm::superuser, default::foo };
+                };
+            ''')
+
+        # Alter superuser
+        await self.con.execute('''
+            create superuser role foo_11e {
+                set permissions := default::foo
+            };
+        ''')
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                alter role foo_11e {
+                    set permissions := sys::perm::superuser;
+                };
+            ''')
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                alter role foo_11e {
+                    set permissions := { sys::perm::superuser, default::foo };
+                };
+            ''')
+
+        # Non-superuser
+        await self.con.execute('''
+            create role foo_11f {
+                set permissions := default::foo
+            };
+        ''')
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                alter role foo_11f {
+                    set permissions := sys::perm::superuser;
+                };
+            ''')
+        async with self.assertRaisesRegexTx(
+            edgedb.SchemaDefinitionError,
+            r'Permission "sys::perm::superuser" cannot be explicitly granted',
+        ):
+            await self.con.execute('''
+                alter role foo_11f {
+                    set permissions := { sys::perm::superuser, default::foo };
+                };
+            ''')
 
     async def test_edgeql_ddl_role_permission_inheritance_01(self):
         # Check different inheritance trees produce correct permissions
@@ -11125,7 +11273,7 @@ type default::Foo {
             };
             CREATE ROLE perm_inh_01_g EXTENDING perm_inh_01_a, perm_inh_01_c;
             CREATE ROLE perm_inh_01_h EXTENDING perm_inh_01_a {
-                SET permissions := sys::data_modification
+                SET permissions := sys::perm::data_modification
             };
             CREATE ROLE perm_inh_01_i EXTENDING perm_inh_01_h, perm_inh_01_c;
         """)
@@ -11195,10 +11343,10 @@ type default::Foo {
                 },
                 {
                     'name': 'perm_inh_01_h',
-                    'permissions': ['sys::data_modification'],
+                    'permissions': ['sys::perm::data_modification'],
                     'all_permissions': tb.bag([
                         'default::foo',
-                        'sys::data_modification',
+                        'sys::perm::data_modification',
                     ]),
                 },
                 {
@@ -11208,7 +11356,7 @@ type default::Foo {
                         'custom::bar',
                         'custom::baz',
                         'default::foo',
-                        'sys::data_modification',
+                        'sys::perm::data_modification',
                     ]),
                 },
             ]
@@ -11356,7 +11504,7 @@ type default::Foo {
             CREATE ROLE subuser4 EXTENDING subuser1 {
                 SET password := 'test_c';
                 SET permissions := {
-                    default::foo, custom::bar, sys::data_modification
+                    default::foo, custom::bar, sys::perm::data_modification
                 };
             };
             CREATE ROLE subuser5 EXTENDING subuser3;
@@ -11404,7 +11552,7 @@ type default::Foo {
                 r"SET permissions := { "
                     r"custom::bar, "
                     r"default::foo, "
-                    r"sys::data_modification "
+                    r"sys::perm::data_modification "
                 r"}; "
             r"};"
         )
@@ -12352,7 +12500,7 @@ type default::Foo {
                 'create alias foo := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12381,7 +12529,7 @@ type default::Foo {
                 'create alias foo := [(f := [1])]',
                 [
                     {
-                        'name': 'array<tuple<f:array<std||int64>>>',
+                        'name': 'array<tuple<f:array<std::int64>>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12391,7 +12539,7 @@ type default::Foo {
                         'type_name': 'schema::ArrayExprAlias',
                     },
                     {
-                        'name': 'tuple<f:array<std|int64>>',
+                        'name': 'tuple<f:array<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12415,7 +12563,7 @@ type default::Foo {
                         'type_name': 'schema::TupleExprAlias',
                     },
                     {
-                        'name': 'tuple<array<std|int64>>',
+                        'name': 'tuple<array<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12435,7 +12583,7 @@ type default::Foo {
                 'create alias foo := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12455,7 +12603,7 @@ type default::Foo {
                 'create alias bar := ((1,),)',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12475,7 +12623,7 @@ type default::Foo {
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12495,7 +12643,7 @@ type default::Foo {
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12515,7 +12663,7 @@ type default::Foo {
                 'create alias foo := [(1,)]',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12535,7 +12683,7 @@ type default::Foo {
                 'create alias bar := ((1,),)',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12555,7 +12703,7 @@ type default::Foo {
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12565,7 +12713,7 @@ type default::Foo {
                 'drop alias bar',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12605,7 +12753,7 @@ type default::Foo {
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12615,7 +12763,7 @@ type default::Foo {
                 'create function bar() -> array<tuple<int64>> using([(1,)])',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12630,7 +12778,7 @@ type default::Foo {
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12640,7 +12788,7 @@ type default::Foo {
                 'drop alias foo',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12665,7 +12813,7 @@ type default::Foo {
                 'create function foo() -> array<tuple<int64>> using([(1,)])',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12680,7 +12828,7 @@ type default::Foo {
                 'create alias bar := ((1,),)',
                 [
                     {
-                        'name': 'array<tuple<std|int64>>',
+                        'name': 'array<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Array',
                     },
@@ -12695,7 +12843,7 @@ type default::Foo {
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -12715,7 +12863,7 @@ type default::Foo {
                         'type_name': 'schema::Tuple',
                     },
                     {
-                        'name': 'tuple<tuple<std|int64>>',
+                        'name': 'tuple<tuple<std::int64>>',
                         'from_alias': False,
                         'type_name': 'schema::Tuple',
                     },
@@ -19815,6 +19963,10 @@ DDLStatement);
 class TestDDLNonIsolated(tb.DDLTestCase):
     TRANSACTION_ISOLATION = False
 
+    PER_TEST_TEARDOWN = [
+        'reset schema to initial'
+    ]
+
     async def test_edgeql_ddl_consecutive_create_migration_01(self):
         # A regression test for https://github.com/edgedb/edgedb/issues/2085.
         await self.con.execute('''
@@ -19935,7 +20087,7 @@ class TestDDLNonIsolated(tb.DDLTestCase):
 
         try:
             for _ in range(2):
-                con = await self.connect(database=self.con.dbname)
+                con = await self.connect()
                 await con.query('select 1')
                 cons.append(con)
             con2, con3 = cons
@@ -20108,3 +20260,127 @@ class TestDDLNonIsolated(tb.DDLTestCase):
             """,
             [True],
         )
+
+    async def test_edgeql_ddl_concurrent_index_01(self):
+        await self.con.execute('''
+            create type T { create required property n -> str; };
+        ''')
+        await self.con.execute('''
+            alter type T {
+                create index on (.n) { set build_concurrently := true; }
+            };
+        ''')
+        with self.assertRaisesRegex(edgedb.SchemaDefinitionError, 'not active'):
+            await self.con.execute('''
+                alter type T {
+                    alter index on (.n) { set build_concurrently := false; }
+                };
+            ''')
+
+        msgs = []
+        await create_concurrent_indexes(self.con, msg_callback=msgs.append)
+        self.assertEqual(
+            msgs, ["Creating concurrent index on 'default::T' with expr (.n)"]
+        )
+
+        await self.con.execute('''
+            alter type T {
+                alter index on (.n) { set build_concurrently := false; }
+            };
+        ''')
+
+    async def test_edgeql_ddl_concurrent_index_02(self):
+        await self.con.execute('''
+            create type T {
+                create required property n -> str;
+                create required property s -> int64;
+                create index on (.n) { set build_concurrently := true; };
+                create index on (.s) { set build_concurrently := true; };
+            };
+        ''')
+
+        msgs = []
+        await create_concurrent_indexes(self.con, msg_callback=msgs.append)
+        msgs.sort()
+        self.assertEqual(
+            msgs,
+            [
+                "Creating concurrent index on 'default::T' with expr (.n)",
+                "Creating concurrent index on 'default::T' with expr (.s)",
+            ]
+        )
+
+    async def test_edgeql_ddl_concurrent_index_03(self):
+        await self.con.execute('''
+            create type T { create required property n -> str; };
+        ''')
+        await self.con.execute('''
+            alter type T {
+                create index on (.n) { set build_concurrently := true; }
+            };
+        ''')
+
+        ev = asyncio.Event()
+
+        con2 = await self.connect(database=self.con.dbname)
+        try:
+            async with self.con.transaction():
+                await self.con.execute('''
+                    insert T { n := "0123" };
+                ''')
+                task = asyncio.create_task(
+                    create_concurrent_indexes(
+                        con2,
+                        msg_callback=lambda _: ev.set()
+                    )
+                )
+                await ev.wait()
+                await asyncio.sleep(2)
+
+                await self.con.execute('''
+                    insert T { n := "789" };
+                ''')
+
+                # Task can't have finished while the tx is held open
+                assert not task.done()
+
+            self.assertEqual(await task, 1)
+        finally:
+            await con2.aclose()
+
+        self.assertEqual(
+            await create_concurrent_indexes(
+                self.con, msg_callback=lambda _: None
+            ),
+            0,
+        )
+
+
+async def create_concurrent_indexes(db, msg_callback=print):
+    '''Actually create all "create concurrently" indexes
+
+    The protocol here is to find all the indexes that need created,
+    and create them with `administer concurrent_index_build()`.
+    It's possible that the database will shut down after an index
+    creation but before the metadata is updated, in which case
+    we might rerun the command later, which is harmless.
+
+    If we stick with this ADMINISTER-based schemed, I figure this code
+    would live in the CLI.
+    '''
+    indexes = await db.query('''
+        select schema::Index {
+            id, expr, subject_name := .<indexes[is schema::ObjectType].name
+        }
+        filter .build_concurrently and not .active
+    ''')
+    for index in indexes:
+        msg_callback(
+            f"Creating concurrent index on '{index.subject_name}' "
+            f"with expr ({index.expr})"
+        )
+        await db.execute(f'''
+            administer concurrent_index_build(<uuid>"{index.id}")
+        ''')
+
+    return len(indexes)

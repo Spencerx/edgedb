@@ -21,7 +21,7 @@ from __future__ import annotations
 
 # Import specific things to avoid name clashes
 from typing import (Generator, Mapping, Optional,
-                    Iterable, Generic, TypeVar, Sequence,
+                    Iterable, TypeVar, Sequence,
                     AbstractSet)
 
 import functools
@@ -124,7 +124,7 @@ TypeLike = Type | s_types.Type
 T = TypeVar('T')
 
 
-class UnqualObjectIndex(Generic[T]):
+class UnqualObjectIndex[T]:
 
     def __init__(self, items: Mapping[sn.UnqualName, T]) -> None:
         self._items = items
@@ -347,7 +347,7 @@ def trace_refs(
     module: str,
     objects: dict[sn.QualName, Optional[ObjectLike]],
     pointers: Mapping[sn.UnqualName, set[sn.QualName]],
-    params: Mapping[str, sn.QualName],
+    params: Mapping[str, qlast.TypeExpr],
     local_modules: AbstractSet[str]
 ) -> tuple[frozenset[sn.QualName], frozenset[sn.QualName]]:
 
@@ -455,7 +455,7 @@ class TracerContext:
         anchors: Mapping[str, sn.QualName],
         path_prefix: Optional[sn.QualName],
         modaliases: dict[Optional[str], str],
-        params: Mapping[str, sn.QualName],
+        params: Mapping[str, qlast.TypeExpr],
         visited: set[s_pointers.Pointer | Pointer],
         local_modules: AbstractSet[str],
     ) -> None:
@@ -476,9 +476,6 @@ class TracerContext:
         # We don't actually expect to handle anything other than
         # ObjectRef here.
         assert isinstance(ref, qlast.ObjectRef)
-
-        if not ref.module and ref.name in self.params:
-            return self.params[ref.name]
 
         return resolve_name(
             ref,
@@ -812,6 +809,23 @@ def trace_Path(
             aname = sn.QualName('__alias__', step.name)
             if not step.module and aname in ctx.objects:
                 tip = ctx.objects[aname]
+
+            elif not step.module and step.name in ctx.params:
+                param_type = ctx.params[step.name]
+                if (
+                    isinstance(param_type, qlast.TypeName)
+                    and isinstance(param_type.maintype, qlast.PseudoObjectRef)
+                ):
+                    # Pretend pseudotypes (eg. `anytype`) have a fully
+                    # qualified name.
+                    refname = sn.QualName('std', param_type.maintype.name)
+                    ctx.refs.add(refname)
+
+                    tip = ctx.objects[refname]
+
+                else:
+                    tip = _resolve_type_expr(param_type, ctx=ctx)
+
             else:
                 refname = ctx.get_ref_name(step)
                 if refname in ctx.objects:

@@ -85,6 +85,7 @@ from edb.ir import typeutils as irtyputils
 from edb.ir import utils as irutils
 
 from edb.pgsql import common
+from edb.pgsql import debug as pg_debug
 from edb.pgsql import dbops
 from edb.pgsql import params
 from edb.pgsql import deltafts
@@ -1432,6 +1433,9 @@ class FunctionCommand(MetaCommand):
                 backend_runtime_params=context.backend_runtime_params,
                 versioned_stdlib=context.stdmode,
             )
+
+            pg_debug.dump_ast_and_query(sql_res.ast, compiled_expr.irast)
+
             body = codegen.generate_source(sql_res.ast)
 
         return self.make_function(func, body, schema), replace
@@ -3427,7 +3431,7 @@ class CreateIndex(IndexCommand, adapts=s_indexes.CreateIndex):
         index: s_indexes.Index,
         schema: s_schema.Schema,
         context: sd.CommandContext,
-    ):
+    ) -> dbops.Command:
         from .compiler import astutils
 
         options = get_index_compile_options(
@@ -3540,7 +3544,12 @@ class CreateIndex(IndexCommand, adapts=s_indexes.CreateIndex):
                 'kwargs': sql_kwarg_exprs,
             }
         )
-        return dbops.CreateIndex(pg_index)
+        concurrently = index.get_build_concurrently(schema)
+        return dbops.CreateIndex(
+            pg_index,
+            concurrently=concurrently,
+            builtin_conditional=concurrently,
+        )
 
     def _create_innards(
         self,
@@ -3552,6 +3561,9 @@ class CreateIndex(IndexCommand, adapts=s_indexes.CreateIndex):
 
         if index.get_abstract(schema):
             # Don't do anything for abstract indexes
+            return schema
+
+        if index.get_build_concurrently(schema):
             return schema
 
         with errors.ensure_span(self.span):
@@ -3939,9 +3951,9 @@ class CancelPointerCardinalityUpdate(MetaCommand):
     pass
 
 
-class PointerMetaCommand(
+class PointerMetaCommand[Pointer_T: s_pointers.Pointer](
     CompositeMetaCommand,
-    s_pointers.PointerCommand[s_pointers.Pointer_T],
+    s_pointers.PointerCommand[Pointer_T],
 ):
     def get_host(self, schema, context):
         if context:
@@ -4043,7 +4055,7 @@ class PointerMetaCommand(
         is_lprop = ptr.is_link_property(schema)
         is_multi = ptr_table and not is_lprop
         is_required = ptr.get_required(schema)
-        is_scalar = ptr.is_property(schema)
+        is_scalar = ptr.is_property()
 
         ref_ctx = self.get_referrer_context_or_die(context)
         ref_op = ref_ctx.op
@@ -4984,7 +4996,7 @@ class LinkMetaCommand(PointerMetaCommand[s_links.Link]):
                 table_name=new_table_name,
                 columns=[src_col, tgt_col]))
 
-        if not link.is_non_concrete(schema) and link.scalar():
+        if not link.is_non_concrete(schema) and link.is_property():
             tgt_prop = link.getptr(schema, sn.UnqualName('target'))
             tgt_ptr = types.get_pointer_storage_info(
                 tgt_prop, schema=schema)
@@ -6978,6 +6990,9 @@ class CreateRole(MetaCommand, RoleMixin, adapts=s_roles.CreateRole):
         permissions: list[str] = list(sorted(
             role.get_permissions(schema) or ()
         ))
+        branches: list[str] = list(sorted(
+            role.get_branches(schema)
+        ))
 
         instance_params = backend_params.instance_params
         tenant_id = instance_params.tenant_id
@@ -7012,6 +7027,7 @@ class CreateRole(MetaCommand, RoleMixin, adapts=s_roles.CreateRole):
                 password_hash=passwd,
                 builtin=role.get_builtin(schema),
                 permissions=permissions,
+                branches=branches,
             ),
         )
         self.pgops.add(dbops.CreateRole(db_role))
@@ -7039,6 +7055,8 @@ class AlterRole(MetaCommand, RoleMixin, adapts=s_roles.AlterRole):
             name=role_name,
             tenant_id=tenant_id,
             builtin=role.get_builtin(schema),
+            permissions=list(sorted(role.get_permissions(schema) or ())),
+            branches=list(sorted(role.get_branches(schema) or ())),
         )
 
         if self.has_attribute_value('password'):
@@ -7055,15 +7073,11 @@ class AlterRole(MetaCommand, RoleMixin, adapts=s_roles.AlterRole):
                 kwargs['password'] = old_passwd
             metadata['password_hash'] = old_passwd
 
-        if self.has_attribute_value('permissions'):
-            permissions = list(sorted(
-                self.get_attribute_value('permissions') or ()
-            ))
-
+        if (
+            self.has_attribute_value('permissions')
+            or self.has_attribute_value('branches')
+        ):
             update_metadata = True
-            metadata['permissions'] = permissions
-        elif old_permissions := role.get_permissions(schema):
-            metadata['permissions'] = list(sorted(old_permissions))
 
         pg_role_name = common.get_role_backend_name(
             role_name, tenant_id=tenant_id)

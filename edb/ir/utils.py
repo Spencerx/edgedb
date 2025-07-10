@@ -23,7 +23,6 @@ from __future__ import annotations
 from typing import (
     Any,
     Optional,
-    TypeVar,
     AbstractSet,
     Mapping,
     Sequence,
@@ -532,10 +531,7 @@ def find_set_of_op(
     return next(iter(calls or []), None)
 
 
-ExprT = TypeVar('ExprT', bound=irast.Expr)
-
-
-def is_set_instance(
+def is_set_instance[ExprT: irast.Expr](
     ir: irast.Set,
     typ: type[ExprT],
 ) -> TypeGuard[irast.SetE[ExprT]]:
@@ -590,3 +586,10 @@ def collect_schema_types(stmt: irast.Base) -> set[uuid.UUID]:
     visitor = CollectSchemaTypesVisitor()
     visitor.visit(stmt)
     return visitor.types
+
+
+def is_linkful(ir: irast.Base) -> bool:
+    def flt(p: irast.Pointer) -> bool:
+        return typeutils.is_object(p.typeref)
+
+    return bool(ast.find_children(ir, irast.Pointer, flt, terminate_early=True))

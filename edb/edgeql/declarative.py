@@ -350,12 +350,12 @@ class ExprDependency(Dependency):
 
 class FunctionDependency(ExprDependency):
 
-    params: Mapping[str, s_name.QualName]
+    params: Mapping[str, qlast.TypeExpr]
 
     def __init__(
         self,
         expr: qlast.Expr,
-        params: Mapping[str, s_name.QualName],
+        params: Mapping[str, qlast.TypeExpr],
     ) -> None:
         super().__init__(expr=expr)
         self.params = params
@@ -649,7 +649,7 @@ def _trace_item_layout(
                     for pn, p in base_pointers.items(ctx.schema):
                         PointerType = (
                             qltracer.Property
-                            if p.is_property(ctx.schema) else
+                            if p.is_property() else
                             qltracer.Link
                         )
                         base_obj.pointers[pn] = PointerType(
@@ -1089,14 +1089,9 @@ def trace_Function(
     deps.extend(TypeDependency(texpr=param.type) for param in node.params)
     deps.append(TypeDependency(texpr=node.returning))
 
-    params = {}
+    params: dict[str, qlast.TypeExpr] = {}
     for param in node.params:
-        assert isinstance(param.type, qlast.TypeName)
-        if not param.type.subtypes:
-            param_t = ctx.get_ref_name(param.type.maintype)
-            params[param.name] = param_t
-        else:
-            params[param.name] = s_name.QualName('std', 'BaseObject')
+        params[param.name] = param.type
 
     if node.nativecode is not None:
         deps.append(FunctionDependency(expr=node.nativecode, params=params))
@@ -1247,6 +1242,11 @@ def _register_item(
                 alter_cmd.subjectexpr = decl.subjectexpr
                 alter_cmd.args = decl.args
 
+            # functions need to preserve arguments
+            if isinstance(decl, qlast.CreateFunction):
+                assert isinstance(alter_cmd, qlast.FunctionCommand)
+                alter_cmd.params = decl.params
+
             if not ctx.depstack:
                 alter_cmd.aliases = [
                     qlast.ModuleAliasDecl(alias=None, module=ctx.module)
@@ -1276,6 +1276,7 @@ def _register_item(
                 deps |= _get_hard_deps(expr.texpr, ctx=ctx)
             elif isinstance(expr, ExprDependency):
                 qlexpr = expr.expr
+                params: Mapping[str, qlast.TypeExpr]
                 if isinstance(expr, FunctionDependency):
                     params = expr.params
                 else:

@@ -101,7 +101,7 @@ class Base(ast.AST):
 
 class GrammarEntryPoint(Base):
     """Mixin denoting nodes that are entry points for EdgeQL grammar"""
-    __mixin_node__ = True
+    __abstract_node__ = True
 
 
 class OptionValue(Base):
@@ -323,6 +323,7 @@ class BytesConstant(BaseConstant):
 
 class Parameter(Expr):
     name: str
+    is_func_param: bool = False
 
 
 class UnaryOp(Expr):
@@ -448,8 +449,7 @@ class Set(Expr):
 # Statements
 #
 
-
-class Command(GrammarEntryPoint, Base):
+class Command(Base):
     """
     A top-level node that is evaluated by our server and
     cannot be a part of a sub expression.
@@ -457,6 +457,10 @@ class Command(GrammarEntryPoint, Base):
 
     __abstract_node__ = True
     aliases: typing.Optional[list[Alias]] = None
+
+
+class Commands(GrammarEntryPoint, Base):
+    commands: list[Command]
 
 
 class SessionSetAliasDecl(Command):
@@ -525,7 +529,7 @@ class Shape(Expr):
     allow_factoring: bool = False
 
 
-class Query(Expr, GrammarEntryPoint):
+class Query(Expr, GrammarEntryPoint, Command):
     __abstract_node__ = True
 
     aliases: typing.Optional[list[Alias]] = None
@@ -682,7 +686,7 @@ class ReleaseSavepoint(Transaction):
 
 class DDL(Base):
     '''A mixin denoting DDL nodes.'''
-    __mixin_node__ = True
+    __abstract_node__ = True
 
 
 class Position(DDL):
@@ -1583,7 +1587,7 @@ class AdministerStmt(Command):
 class SDL(Base):
     '''A mixin denoting SDL nodes.'''
 
-    __mixin_node__ = True
+    __abstract_node__ = True
 
 
 class ModuleDeclaration(SDL):
